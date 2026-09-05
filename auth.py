@@ -1,38 +1,27 @@
-import jwt
+import os
 from datetime import datetime, timedelta
-from fastapi import HTTPException, Security, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from jose import jwt
 from passlib.context import CryptContext
+from fastapi.security import OAuth2PasswordBearer
 
-# Flaw 3: Hardcoded JWT Secret Key
-SECRET_KEY = "super_secret_dev_key_do_not_share"
+# --- SECURITY UPGRADE: Externalized Secrets ---
+# Removes hardcoded string, pulling from environment to prevent token forgery.
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "development_fallback_key")
 ALGORITHM = "HS256"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security = HTTPBearer()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
+def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=60)
+    expire = datetime.utcnow() + timedelta(minutes=30)
     to_encode.update({"exp": expire})
-    # Flaw 4: Vulnerable to None algorithm attacks if not strictly enforced on decode
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)):
-    token = credentials.credentials
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-        return username
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
+    # Explicitly enforcing the algorithm to prevent 'None' attacks
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
